@@ -1,70 +1,73 @@
 #!/usr/bin/python
 
+from pandas import Series, DataFrame
+import pandas as pd
 import glob, os
 import re
 
-def find_time_millis(content):
-    pattern = re.compile(r"Uptime:\s+(\d+)\s+Realtime:\s+(\d+)")
-    match = pattern.search(content)
+full_categories = ['Pss Total', 'Private Drity', 'Private Clean',
+                   'SwapPss Dirty', 'Heap Size', 'Heap Alloc', 'Heap Free']
+
+patterns = {'time':re.compile(r"(Uptime):\s+(\d+)\s+(Realtime):\s+(\d+)"),
+            'process':re.compile(r"MEMINFO in pid\s+(\d+)\s+\[(.+)\]"),
+            'detail':re.compile(r"(\w+\s*\w+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)"),
+            'other':re.compile(r"(\w+\s*\w+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)")}
+
+def find_with_pattern(content, first_pattern, detail_pattern=None):
+    if detail_pattern is not None:
+        match = detail_pattern.search(content)
+        if match:
+            return list(match.groups())
+
+    match = first_pattern.search(content)
     if match:
-        print("time info")
-        for i in range(1, 3):
-            print(match.group(i))
+        return list(match.groups())
+    return list()
 
-def find_process_name(content):
-    pattern = re.compile(r"MEMINFO in pid\s+(\d+)\s+\[(.+)\]")
-    match = pattern.search(content)
-    if match:
-        print("processes info")
-        for i in range(1, 3):
-            print(match.group(i))
+def get_column_with_category(default, sub):
+    return "[" + default + " - " + sub + "]";
 
-def find_heap_detail(content, head):
-    pattern = re.compile(r""+head+"\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)")
-    match = pattern.search(content)
-    if match:
-        print(head)
-        for i in range(1, 8):
-            print(match.group(i))
+def fill_data_frame(dataframe, file, content):
+    #Fill time data
+    data = find_with_pattern(content, patterns['time'])
+    if len(data) > 0:
+        dataframe.ix[file, data[0]] = int(data[1])
+        dataframe.ix[file, data[2]] = int(data[3])
 
-def find_other_detail(content, head):
-    pattern = re.compile(r""+head+"\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)")
-    match = pattern.search(content)
-    if match:
-        print(head)
-        for i in range(1, 5):
-            print(match.group(i))
+    #Fill process meta data
+    data = find_with_pattern(content, patterns['process'])
+    if len(data) > 0:
+        dataframe.ix[file, 'PID'] = int(data[0])
+        dataframe.ix[file, 'Package'] = data[1]
 
+    #Fill process detail data
+    data = find_with_pattern(content, patterns['other'], detail_pattern=patterns['detail'])
+    if len(data) > 0:
+        default_type = data[0]
+        for i in range(1, len(data)):
+            dataframe.ix[file, get_column_with_category(default_type,full_categories[i-1])] = int(data[i])
 
+    return None
+
+def save_to_excel(df, file):
+    writer = pd.ExcelWriter(file, engine='xlsxwriter')
+    df.to_excel(writer, sheet_name='Sheet1')
+    writer.save()
 
 def main():
     os.chdir("files")
+    total_data = DataFrame()
     for file in glob.glob("*.txt"):
         f = open(file, 'r')
         lines = f.readlines()
         for line in lines:
-            find_time_millis(line)
-            find_process_name(line)
-            find_heap_detail(line, "Native Heap")
-            find_heap_detail(line, "Dalvik Heap")
-            find_other_detail(line, "Dalvik Other")
-            find_other_detail(line, "Stack")
-            find_other_detail(line, "Ashmem")
-            find_other_detail(line, "Gfx de")
-            find_other_detail(line, "Other dev")
-            find_other_detail(line, ".so mmap")
-            find_other_detail(line, ".apk mmap")
-            find_other_detail(line, ".ttf mmap")
-            find_other_detail(line, ".dex mmap")
-            find_other_detail(line, ".oat mmap")
-            find_other_detail(line, ".art mmap")
-            find_other_detail(line, "Other mmap")
-            find_other_detail(line, "GL mtrack")
-            find_other_detail(line, "Unknown")
-            find_heap_detail(line, "TOTAL")
-
-
+            fill_data_frame(total_data, file, line)
         f.close()
+    total_data.fillna(0, inplace=True)
+    save_to_excel(total_data, "convert.xlsx")
+    print(total_data)
+
+    print(total_data['[Native Heap - Pss Total]'])
 
 
 if __name__ == "__main__":
