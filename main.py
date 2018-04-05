@@ -4,6 +4,7 @@ from pandas import Series, DataFrame
 import pandas as pd
 import glob, os
 import re
+import random
 
 full_categories = ['Pss Total', 'Private Drity', 'Private Clean',
                    'SwapPss Dirty', 'Heap Size', 'Heap Alloc', 'Heap Free']
@@ -51,7 +52,40 @@ def fill_data_frame(dataframe, file, content):
 
 def save_to_excel(df, file):
     writer = pd.ExcelWriter(file, engine='xlsxwriter')
-    df.to_excel(writer, sheet_name='Sheet1')
+
+    packages = df['Package'].drop_duplicates().values.tolist()
+    for package in packages:
+        package_sheet = df.ix[df['Package'] == package]
+        package_sheet = package_sheet.sort_values(by=['Realtime'], ascending=[True])
+        package_sheet.insert(0, 'Index', range(1, 1 + len(package_sheet)))
+        package_sheet.to_excel(writer, sheet_name=package+'_total')
+
+        #excel chart from : http://xlsxwriter.readthedocs.io/example_pandas_chart_line.html
+        #chart only interest column
+        package_sheet.set_index('Index', inplace=True)
+        interest_column = [col for col in package_sheet.columns if 'Pss Total' in col]
+        interest_sheet = package_sheet[interest_column]
+        interest_sheet.to_excel(writer, sheet_name=package)
+
+        workbook = writer.book
+        worksheet = writer.sheets[package]
+        chart = workbook.add_chart({'type': 'line'})
+
+        max_row = len(interest_sheet)
+        for i in range(len(interest_sheet.columns)):
+            col = i + 1
+            chart.add_series({
+                'name': [package, 0, col],
+                'categories': [package, 1, 0, max_row, 0],
+                'values': [package, 1, col, max_row, col],
+            })
+
+        chart.set_x_axis({'name': 'Runs'})
+        chart.set_y_axis({'name': 'K Bytes', 'major_gridlines': {'visible': False}})
+
+        # Insert the chart into the worksheet.
+        worksheet.insert_chart('G2', chart, {'x_offset':-500, 'y_offset':-500, 'x_scale': 3, 'y_scale': 2})
+
     writer.save()
 
 def main():
@@ -64,10 +98,7 @@ def main():
             fill_data_frame(total_data, file, line)
         f.close()
     total_data.fillna(0, inplace=True)
-    save_to_excel(total_data, "convert.xlsx")
-    print(total_data)
-
-    print(total_data['[Native Heap - Pss Total]'])
+    save_to_excel(total_data, "dumpsys_datas.xlsx")
 
 
 if __name__ == "__main__":
